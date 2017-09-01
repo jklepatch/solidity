@@ -1,6 +1,9 @@
 ### 0.4.18 (unreleased)
 
 Features:
+ * Code Generator: Support passing ``structs`` as arguments and return parameters (requires ``pragma experimental ABIEncoderV2;`` for now).
+ * Code Generator: New ABI decoder which supports structs and arbitrarily nested
+   arrays and checks input size (activate using ``pragma experimental ABIEncoderV2;``.
  * Code Generator: Always use all available gas for calls as experimental 0.5.0 feature
    (previously, some amount was retained in order to work in pre-tangerine whistle
    EVM versions)
