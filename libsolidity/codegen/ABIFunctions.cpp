@@ -1230,6 +1230,7 @@ string ABIFunctions::abiDecodingFunctionByteArray(ArrayType const& _type, bool _
 
 string ABIFunctions::abiDecodingFunctionStruct(StructType const& /*_type*/, bool /*_fromMemory*/)
 {
+	// This has to do out-of-bounds checking of its members
 	solUnimplemented("");
 	return "";
 }
