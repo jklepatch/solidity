@@ -165,9 +165,11 @@ private:
 	/// The caller has to ensure that no out of bounds access (at least to the static
 	/// part) can happen inside this function.
 	/// @param _fromMemory if decoding from memory instead of from calldata
+	/// @param _forUseOnStack if the decoded value is stored on stack or in memory.
 	std::string abiDecodingFunction(
 		Type const& _Type,
-		bool _fromMemory
+		bool _fromMemory,
+		bool _forUseOnStack
 	);
 
 	/// Part of @a abiDecodingFunction for "regular" array types.
@@ -179,7 +181,7 @@ private:
 	/// Part of @a abiDecodingFunction for struct types.
 	std::string abiDecodingFunctionStruct(StructType const& _type, bool _fromMemory);
 	/// Part of @a abiDecodingFunction for array types.
-	std::string abiDecodingFunctionFunctionType(FunctionType const& _type, bool _fromMemory);
+	std::string abiDecodingFunctionFunctionType(FunctionType const& _type, bool _fromMemory, bool _forUseOnStack);
 
 	/// @returns a function that copies raw bytes of dynamic length from calldata
 	/// or memory to memory.

@@ -159,7 +159,7 @@ string ABIFunctions::tupleDecoder(TypePointers const& _types, bool _fromMemory)
 			elementTempl("load", _fromMemory ? "mload" : "calldataload");
 			elementTempl("values", boost::algorithm::join(valueNamesLocal, ", "));
 			elementTempl("pos", to_string(headPos));
-			elementTempl("abiDecode", abiDecodingFunction(*_types[i], _fromMemory));
+			elementTempl("abiDecode", abiDecodingFunction(*_types[i], _fromMemory, true));
 			decodeElements += elementTempl.render();
 			headPos += dynamic ? 0x20 : decodingTypes[i]->calldataEncodedSize();
 		}
@@ -1051,7 +1051,7 @@ string ABIFunctions::abiEncodingFunctionFunctionType(
 		});
 }
 
-string ABIFunctions::abiDecodingFunction(Type const& _type, bool _fromMemory)
+string ABIFunctions::abiDecodingFunction(Type const& _type, bool _fromMemory, bool _forUseOnStack)
 {
 	TypePointer decodingType = _type.decodingType();
 	solAssert(decodingType, "");
@@ -1071,7 +1071,7 @@ string ABIFunctions::abiDecodingFunction(Type const& _type, bool _fromMemory)
 	else if (auto const* structType = dynamic_cast<StructType const*>(decodingType.get()))
 		return abiDecodingFunctionStruct(*structType, _fromMemory);
 	else if (auto const* functionType = dynamic_cast<FunctionType const*>(decodingType.get()))
-		return abiDecodingFunctionFunctionType(*functionType, _fromMemory);
+		return abiDecodingFunctionFunctionType(*functionType, _fromMemory, _forUseOnStack);
 
 	solAssert(decodingType->sizeOnStack() == 1, "");
 	solAssert(decodingType->isValueType(), "");
@@ -1126,7 +1126,7 @@ string ABIFunctions::abiDecodingFunctionArray(ArrayType const& _type, bool _from
 						let elementPos := <retrieveElementPos>
 						<dynamicBoundsCheck>
 						mstore(dst, <decodingFun>(elementPos, end))
-						dst := add(dst, 0x20) // does not work for byte array
+						dst := add(dst, 0x20)
 						src := add(src, <baseEncodedSize>)
 					}
 				}
@@ -1144,6 +1144,9 @@ string ABIFunctions::abiDecodingFunctionArray(ArrayType const& _type, bool _from
 		if (dynamicBase)
 		{
 			templ("staticBoundsCheck", "");
+			// The dynamic bounds check might not be needed (because we have an additional check
+			// one level deeper), but we keep it in just in case. This at least prevents
+			// the part one level deeper from reading the length from an out of bounds position.
 			templ("dynamicBoundsCheck", "switch gt(elementPos, end) case 1 { revert(0, 0) }");
 			templ("retrieveElementPos", "add(offset, " + load + "(src))");
 		}
@@ -1154,17 +1157,20 @@ string ABIFunctions::abiDecodingFunctionArray(ArrayType const& _type, bool _from
 			templ("retrieveElementPos", "src");
 		}
 		templ("baseEncodedSize", baseEncodedSize);
-		templ("decodingFun", abiDecodingFunction(*_type.baseType(), _fromMemory));
+		templ("decodingFun", abiDecodingFunction(*_type.baseType(), _fromMemory, false));
 		return templ.render();
 	});
 }
 
 string ABIFunctions::abiDecodingFunctionCalldataArray(ArrayType const& _type)
 {
-	solUnimplementedAssert(_type.baseType()->isValueType(), "");
+	// This does not work with arrays of complex types - the array access
+	// is not yet implemented in Solidity.
 	solAssert(_type.dataStoredIn(DataLocation::CallData), "");
 	if (!_type.isDynamicallySized())
 		solAssert(_type.length() < u256("0xffffffffffffffff"), "");
+	solAssert(!_type.baseType()->isDynamicallyEncoded(), "");
+	solAssert(_type.baseType()->calldataEncodedSize() < u256("0xffffffffffffffff"), "");
 
 	string functionName =
 		"abi_decode_" +
@@ -1235,25 +1241,41 @@ string ABIFunctions::abiDecodingFunctionStruct(StructType const& /*_type*/, bool
 	return "";
 }
 
-string ABIFunctions::abiDecodingFunctionFunctionType(FunctionType const& _type, bool _fromMemory)
+string ABIFunctions::abiDecodingFunctionFunctionType(FunctionType const& _type, bool _fromMemory, bool _forUseOnStack)
 {
 	solAssert(_type.kind() == FunctionType::Kind::External, "");
 
 	string functionName =
 		"abi_decode_" +
 		_type.identifier() +
-		(_fromMemory ? "_fromMemory" : "");
+		(_fromMemory ? "_fromMemory" : "") +
+		(_forUseOnStack ? "_onStack" : "");
 
 	return createFunction(functionName, [&]() {
-		return Whiskers(R"(
-			function <functionName>(offset, end) -> addr, function_selector {
-				addr, function_selector := <splitExtFun>(<load>(offset))
-			}
-		)")
-		("functionName", functionName)
-		("load", _fromMemory ? "mload" : "calldataload")
-		("splitExtFun", splitExternalFunctionIdFunction())
-		.render();
+		if (_forUseOnStack)
+		{
+			return Whiskers(R"(
+				function <functionName>(offset, end) -> addr, function_selector {
+					addr, function_selector := <splitExtFun>(<load>(offset))
+				}
+			)")
+			("functionName", functionName)
+			("load", _fromMemory ? "mload" : "calldataload")
+			("splitExtFun", splitExternalFunctionIdFunction())
+			.render();
+		}
+		else
+		{
+			return Whiskers(R"(
+				function <functionName>(offset, end) -> fun {
+					fun := <cleanExtFun>(<load>(offset))
+				}
+			)")
+			("functionName", functionName)
+			("load", _fromMemory ? "mload" : "calldataload")
+			("cleanExtFun", cleanupCombinedExternalFunctionIdFunction())
+			.render();
+		}
 	});
 }
 
