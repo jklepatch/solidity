@@ -257,19 +257,40 @@ BOOST_AUTO_TEST_CASE(byte_arrays)
 	)
 }
 
+BOOST_AUTO_TEST_CASE(calldata_arrays_too_large)
+{
+	string sourceCode = R"(
+		contract C {
+			function f(uint a, uint[] b, uint c) external pure returns (uint) {
+				return 7;
+			}
+		}
+	)";
+	bool newEncoder = false;
+	BOTH_ENCODERS(
+		compileAndRun(sourceCode);
+		bytes args = encodeArgs(
+			6, 0x60, 9,
+			(u256(1) << 255) + 2, 1, 2
+		);
+		ABI_CHECK(
+			callContractFunction("f(uint256,uint256[],uint256)", args),
+			newEncoder ? encodeArgs() : encodeArgs(7)
+		);
+		newEncoder = true;
+	)
+}
+
 BOOST_AUTO_TEST_CASE(decode_from_memory_simple)
 {
 	string sourceCode = R"(
-		contract D {
+		contract C {
 			uint public _a;
 			uint[] public _b;
-			function D(uint a, uint[] b) {
+			function C(uint a, uint[] b) {
 				_a = a;
 				_b = b;
 			}
-		}
-		contract C is D {
-			function C(uint a, uint[] b) D(a, b) { }
 		}
 	)";
 	BOTH_ENCODERS(
@@ -286,21 +307,118 @@ BOOST_AUTO_TEST_CASE(decode_from_memory_simple)
 	)
 }
 
-BOOST_AUTO_TEST_CASE(decode_from_memory_complex)
+BOOST_AUTO_TEST_CASE(decode_function_type)
 {
 	string sourceCode = R"(
 		contract D {
+			function () external returns (uint) public _a;
+			function D(function () external returns (uint) a) {
+				_a = a;
+			}
+		}
+		contract C {
+			function f() returns (uint) {
+				return 3;
+			}
+			function g(function () external returns (uint) _f) returns (uint) {
+				return _f();
+			}
+			// uses "decode from memory"
+			function test1() returns (uint) {
+				D d = new D(this.f);
+				return d._a()();
+			}
+			// uses "decode from calldata"
+			function test2() returns (uint) {
+				return this.g(this.f);
+			}
+		}
+	)";
+	BOTH_ENCODERS(
+		compileAndRun(sourceCode, 0, "C");
+		ABI_CHECK(callContractFunction("test1()"), encodeArgs(3));
+		ABI_CHECK(callContractFunction("test2()"), encodeArgs(3));
+	)
+}
+
+BOOST_AUTO_TEST_CASE(decode_function_type_array)
+{
+	string sourceCode = R"(
+		contract D {
+			function () external returns (uint)[] public _a;
+			function D(function () external returns (uint)[] a) {
+				_a = a;
+			}
+		}
+		contract E {
+			function () external returns (uint)[3] public _a;
+			function E(function () external returns (uint)[3] a) {
+				_a = a;
+			}
+		}
+		contract C {
+			function f1() public returns (uint) {
+				return 1;
+			}
+			function f2() public returns (uint) {
+				return 2;
+			}
+			function f3() public returns (uint) {
+				return 3;
+			}
+			function g(function () external returns (uint)[] _f, uint i) public returns (uint) {
+				return _f[i]();
+			}
+			function h(function () external returns (uint)[3] _f, uint i) public returns (uint) {
+				return _f[i]();
+			}
+			// uses "decode from memory"
+			function test1_dynamic() public returns (uint) {
+				var x = new function() external returns (uint)[](3);
+				x[0] = this.f1;
+				x[1] = this.f2;
+				x[2] = this.f3;
+				D d = new D(x);
+				return d._a(2)();
+			}
+			function test1_static() public returns (uint) {
+				E e = new E([this.f1, this.f2, this.f3]);
+				return e._a(2)();
+			}
+			// uses "decode from calldata"
+			function test2_dynamic() public returns (uint) {
+				var x = new function() external returns (uint)[](3);
+				x[0] = this.f1;
+				x[1] = this.f2;
+				x[2] = this.f3;
+				return this.g(x, 0);
+			}
+			function test2_static() public returns (uint) {
+				return this.h([this.f1, this.f2, this.f3], 0);
+			}
+		}
+	)";
+	BOTH_ENCODERS(
+		compileAndRun(sourceCode, 0, "C");
+		ABI_CHECK(callContractFunction("test1_static()"), encodeArgs(3));
+		ABI_CHECK(callContractFunction("test1_dynamic()"), encodeArgs(3));
+		ABI_CHECK(callContractFunction("test2_static()"), encodeArgs(1));
+		ABI_CHECK(callContractFunction("test2_dynamic()"), encodeArgs(1));
+	)
+}
+
+BOOST_AUTO_TEST_CASE(decode_from_memory_complex)
+{
+	string sourceCode = R"(
+		contract C {
 			uint public _a;
 			uint[] public _b;
 			bytes[2] public _c;
-			function D(uint a, uint[] b, bytes[2] c) {
+			function C(uint a, uint[] b, bytes[2] c) {
 				_a = a;
 				_b = b;
 				_c = c;
 			}
-		}
-		contract C is D {
-			function C(uint a, uint[] b, bytes[2] c) D(a, b, c) { }
 		}
 	)";
 	NEW_ENCODER(
@@ -353,6 +471,19 @@ BOOST_AUTO_TEST_CASE(short_input_array)
 		ABI_CHECK(callContractFunctionNoEncoding("f(uint256[])", encodeArgs(0x20, 1) + bytes(31, 0)), encodeArgs());
 		ABI_CHECK(callContractFunctionNoEncoding("f(uint256[])", encodeArgs(0x20, 1) + bytes(32, 0)), encodeArgs(7));
 		ABI_CHECK(callContractFunctionNoEncoding("f(uint256[])", encodeArgs(0x20, 2, 5, 6)), encodeArgs(7));
+	)
+}
+
+BOOST_AUTO_TEST_CASE(short_dynamic_input_array)
+{
+	string sourceCode = R"(
+		contract C {
+			function f(bytes[1] a) public pure returns (uint) { return 7; }
+		}
+	)";
+	NEW_ENCODER(
+		compileAndRun(sourceCode);
+		ABI_CHECK(callContractFunctionNoEncoding("f(bytes[1])", encodeArgs(0x20)), encodeArgs());
 	)
 }
 
