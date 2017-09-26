@@ -1234,11 +1234,61 @@ string ABIFunctions::abiDecodingFunctionByteArray(ArrayType const& _type, bool _
 	});
 }
 
-string ABIFunctions::abiDecodingFunctionStruct(StructType const& /*_type*/, bool /*_fromMemory*/)
+string ABIFunctions::abiDecodingFunctionStruct(StructType const& _type, bool _fromMemory)
 {
-	// This has to do out-of-bounds checking of its members
-	solUnimplemented("");
-	return "";
+	string functionName =
+		"abi_decode_" +
+		_type.identifier() +
+		(_fromMemory ? "_fromMemory" : "");
+
+	solUnimplementedAssert(!_type.dataStoredIn(DataLocation::CallData), "");
+
+	return createFunction(functionName, [&]() {
+		Whiskers templ(R"(
+			function <functionName>(headStart, end) -> struct {
+				switch slt(sub(end, headStart), <minimumSize>) case 1 { revert(0, 0) }
+				struct := <allocate>(<memorySize>)
+				<#members>
+				{
+					// <memberName>
+					<decode>
+				}
+				</members>
+			}
+		)");
+		templ("functionName", functionName);
+		templ("allocate", allocationFunction());
+		solAssert(_type.memorySize() < u256("0xffffffffffffffff"), "");
+		templ("memorySize", toCompactHexWithPrefix(_type.memorySize()));
+		size_t headPos = 0;
+		vector<map<string, string>> members;
+		for (auto const& member: _type.members(nullptr))
+		{
+			solAssert(member.type, "");
+			solAssert(member.type->canLiveOutsideStorage(), "");
+			auto decodingType = member.type->decodingType();
+			solAssert(decodingType, "");
+			bool dynamic = decodingType->isDynamicallyEncoded();
+			Whiskers memberTempl(R"(
+			{
+				let offset := )" + string(dynamic ? "<load>(add(headStart, <pos>))" : "<pos>" ) + R"(
+				mstore(add(struct, <memoryOffset>), <abiDecode>(add(headStart, offset), dataEnd)
+			}
+			)");
+			memberTempl("load", _fromMemory ? "mload" : "calldataload");
+			memberTempl("pos", to_string(headPos));
+			memberTempl("memoryOffset", toCompactHexWithPrefix(_type.memoryOffsetOfMember(member.name)));
+			memberTempl("abiDecode", abiDecodingFunction(*member.type, _fromMemory, false));
+
+			members.push_back({});
+			members.back()["encode"] = memberTempl.render();
+			members.back()["memberName"] = member.name;
+			headPos += dynamic ? 0x20 : decodingType->calldataEncodedSize();
+		}
+		templ("members", members);
+		templ("minimumSize", toCompactHexWithPrefix(headPos));
+		return templ.render();
+	});
 }
 
 string ABIFunctions::abiDecodingFunctionFunctionType(FunctionType const& _type, bool _fromMemory, bool _forUseOnStack)
