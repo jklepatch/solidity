@@ -1114,6 +1114,7 @@ string ABIFunctions::abiDecodingFunctionArray(ArrayType const& _type, bool _from
 		bool dynamicBase = _type.baseType()->isDynamicallyEncoded();
 		Whiskers templ(
 			R"(
+				// <readableTypeName>
 				function <functionName>(offset, end) -> array {
 					let length := <retrieveLength>
 					array := <allocate>(<allocationSize>(length))
@@ -1133,6 +1134,7 @@ string ABIFunctions::abiDecodingFunctionArray(ArrayType const& _type, bool _from
 			)"
 		);
 		templ("functionName", functionName);
+		templ("readableTypeName", _type.toString(true));
 		templ("retrieveLength", !_type.isDynamicallySized() ? toCompactHexWithPrefix(_type.length()) : load + "(offset)");
 		templ("allocate", allocationFunction());
 		templ("allocationSize", arrayAllocationSizeFunction(_type));
@@ -1140,7 +1142,6 @@ string ABIFunctions::abiDecodingFunctionArray(ArrayType const& _type, bool _from
 			templ("storeLength", "mstore(array, length) offset := add(offset, 0x20) dst := add(dst, 0x20)");
 		else
 			templ("storeLength", "");
-		string baseEncodedSize = toCompactHexWithPrefix(_type.baseType()->calldataEncodedSize());
 		if (dynamicBase)
 		{
 			templ("staticBoundsCheck", "");
@@ -1149,14 +1150,16 @@ string ABIFunctions::abiDecodingFunctionArray(ArrayType const& _type, bool _from
 			// the part one level deeper from reading the length from an out of bounds position.
 			templ("dynamicBoundsCheck", "switch gt(elementPos, end) case 1 { revert(0, 0) }");
 			templ("retrieveElementPos", "add(offset, " + load + "(src))");
+			templ("baseEncodedSize", "0x20");
 		}
 		else
 		{
+			string baseEncodedSize = toCompactHexWithPrefix(_type.baseType()->calldataEncodedSize());
 			templ("staticBoundsCheck", "switch gt(add(src, mul(length, " + baseEncodedSize + ")), end) case 1 { revert(0, 0) }");
 			templ("dynamicBoundsCheck", "");
 			templ("retrieveElementPos", "src");
+			templ("baseEncodedSize", baseEncodedSize);
 		}
-		templ("baseEncodedSize", baseEncodedSize);
 		templ("decodingFun", abiDecodingFunction(*_type.baseType(), _fromMemory, false));
 		return templ.render();
 	});
@@ -1179,6 +1182,7 @@ string ABIFunctions::abiDecodingFunctionCalldataArray(ArrayType const& _type)
 		string templ;
 		if (_type.isDynamicallySized())
 			templ = R"(
+				// <readableTypeName>
 				function <functionName>(offset, end) -> arrayPos, length {
 					length := calldataload(offset)
 					switch gt(length, 0xffffffffffffffff) case 1 { revert(0, 0) }
@@ -1188,6 +1192,7 @@ string ABIFunctions::abiDecodingFunctionCalldataArray(ArrayType const& _type)
 			)";
 		else
 			templ = R"(
+				// <readableTypeName>
 				function <functionName>(offset, end) -> arrayPos {
 					arrayPos := offset
 					switch gt(add(arrayPos, mul(<length>, <baseEncodedSize>)), end) case 1 { revert(0, 0) }
@@ -1195,6 +1200,7 @@ string ABIFunctions::abiDecodingFunctionCalldataArray(ArrayType const& _type)
 			)";
 		Whiskers w{templ};
 		w("functionName", functionName);
+		w("readableTypeName", _type.toString(true));
 		w("baseEncodedSize", toCompactHexWithPrefix(_type.isByteArray() ? 1 : _type.baseType()->calldataEncodedSize()));
 		w("length", _type.isDynamicallyEncoded() ? "length" : toCompactHexWithPrefix(_type.length()));
 		return w.render();
@@ -1245,9 +1251,10 @@ string ABIFunctions::abiDecodingFunctionStruct(StructType const& _type, bool _fr
 
 	return createFunction(functionName, [&]() {
 		Whiskers templ(R"(
-			function <functionName>(headStart, end) -> struct {
+			// <readableTypeName>
+			function <functionName>(headStart, end) -> value {
 				switch slt(sub(end, headStart), <minimumSize>) case 1 { revert(0, 0) }
-				struct := <allocate>(<memorySize>)
+				value := <allocate>(<memorySize>)
 				<#members>
 				{
 					// <memberName>
@@ -1257,6 +1264,7 @@ string ABIFunctions::abiDecodingFunctionStruct(StructType const& _type, bool _fr
 			}
 		)");
 		templ("functionName", functionName);
+		templ("readableTypeName", _type.toString(true));
 		templ("allocate", allocationFunction());
 		solAssert(_type.memorySize() < u256("0xffffffffffffffff"), "");
 		templ("memorySize", toCompactHexWithPrefix(_type.memorySize()));
@@ -1270,10 +1278,8 @@ string ABIFunctions::abiDecodingFunctionStruct(StructType const& _type, bool _fr
 			solAssert(decodingType, "");
 			bool dynamic = decodingType->isDynamicallyEncoded();
 			Whiskers memberTempl(R"(
-			{
 				let offset := )" + string(dynamic ? "<load>(add(headStart, <pos>))" : "<pos>" ) + R"(
-				mstore(add(struct, <memoryOffset>), <abiDecode>(add(headStart, offset), dataEnd)
-			}
+				mstore(add(value, <memoryOffset>), <abiDecode>(add(headStart, offset), end))
 			)");
 			memberTempl("load", _fromMemory ? "mload" : "calldataload");
 			memberTempl("pos", to_string(headPos));
@@ -1281,7 +1287,7 @@ string ABIFunctions::abiDecodingFunctionStruct(StructType const& _type, bool _fr
 			memberTempl("abiDecode", abiDecodingFunction(*member.type, _fromMemory, false));
 
 			members.push_back({});
-			members.back()["encode"] = memberTempl.render();
+			members.back()["decode"] = memberTempl.render();
 			members.back()["memberName"] = member.name;
 			headPos += dynamic ? 0x20 : decodingType->calldataEncodedSize();
 		}
