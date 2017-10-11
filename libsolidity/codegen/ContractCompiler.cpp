@@ -329,9 +329,8 @@ void ContractCompiler::appendCalldataUnpacker(TypePointers const& _typeParameter
 	{
 		// Use the new JULIA-based decoding function
 		auto stackHeightBefore = m_context.stackHeight();
-		CompilerUtils utils(m_context);
-		utils.abiDecode(_typeParameters, _fromMemory);
-		solAssert(m_context.stackHeight() - stackHeightBefore == utils.sizeOnStack(_typeParameters) - 1, "");
+		CompilerUtils(m_context).abiDecodeV2(_typeParameters, _fromMemory);
+		solAssert(m_context.stackHeight() - stackHeightBefore == CompilerUtils(m_context).sizeOnStack(_typeParameters) - 1, "");
 		return;
 	}
 

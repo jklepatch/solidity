@@ -319,7 +319,7 @@ void CompilerUtils::abiEncodeV2(
 	m_context << ret.tag();
 }
 
-void CompilerUtils::abiDecode(TypePointers const& _parameterTypes, bool _fromMemory)
+void CompilerUtils::abiDecodeV2(TypePointers const& _parameterTypes, bool _fromMemory)
 {
 	// stack: <source_offset>
 	auto ret = m_context.pushNewTag();

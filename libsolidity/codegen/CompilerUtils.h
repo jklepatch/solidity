@@ -151,7 +151,7 @@ public:
 	/// Can allocate memory.
 	/// Stack pre: <source_offset>
 	/// Stack post: <value0> <value1> ... <valuen>
-	void abiDecode(TypePointers const& _parameterTypes, bool _fromMemory = false);
+	void abiDecodeV2(TypePointers const& _parameterTypes, bool _fromMemory = false);
 
 	/// Zero-initialises (the data part of) an already allocated memory array.
 	/// Length has to be nonzero!
