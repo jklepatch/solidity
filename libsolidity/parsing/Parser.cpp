@@ -340,6 +340,7 @@ Parser::FunctionHeaderParserResult Parser::parseFunctionHeader(bool _forceEmptyN
 		result.name = expectIdentifierToken();
 	VarDeclParserOptions options;
 	options.allowLocationSpecifier = true;
+  options.allowVar = false;
 	result.parameters = parseParameterList(options);
 	while (true)
 	{
@@ -392,6 +393,7 @@ Parser::FunctionHeaderParserResult Parser::parseFunctionHeader(bool _forceEmptyN
 	{
 		bool const permitEmptyParameterList = false;
 		m_scanner->next();
+    options.allowVar = false;
 		result.returnParameters = parseParameterList(options, permitEmptyParameterList);
 	}
 	else
@@ -576,7 +578,7 @@ ASTPointer<VariableDeclaration> Parser::parseVariableDeclaration(
 	}
 	nodeFactory.markEndPosition();
 
-	if (_options.allowEmptyName && m_scanner->currentToken() != Token::Identifier)
+	if (_options.allowEmptyName && m_scanner->currentToken() != Token::Identifier && _options.allowVar == true)
 	{
 		identifier = make_shared<ASTString>("");
 		solAssert(type != nullptr, "");
