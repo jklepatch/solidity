@@ -1698,6 +1698,17 @@ BOOST_AUTO_TEST_CASE(newInvalidTypeName)
 	CHECK_PARSE_ERROR(text, "Expected explicit type name");
 }
 
+BOOST_AUTO_TEST_CASE(varKeywordInFunctionHeader)
+{
+	char const* text = R"(
+		contract C {
+			function f() returns (var storage) {
+			}
+		}
+	)";
+	CHECK_PARSE_ERROR(text, "Error: Expected explicit type name");
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 
 }
